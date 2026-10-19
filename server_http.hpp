@@ -251,6 +251,23 @@ namespace SimpleWeb {
       /// The time point when the request header was fully read.
       std::chrono::system_clock::time_point header_read_time;
 
+      /// Application-owned context follows the transport across keep-alive requests.
+      /// Access is synchronized because handlers may run outside the I/O worker.
+      std::shared_ptr<void> get_connection_context() const noexcept {
+        if(auto connection = this->connection.lock()) {
+          LockGuard lock(connection->context_mutex);
+          return connection->context;
+        }
+        return {};
+      }
+
+      void set_connection_context(std::shared_ptr<void> context) noexcept {
+        if(auto connection = this->connection.lock()) {
+          LockGuard lock(connection->context_mutex);
+          connection->context = std::move(context);
+        }
+      }
+
       asio::ip::tcp::endpoint remote_endpoint() const noexcept {
         try {
           if(auto connection = this->connection.lock())
@@ -304,6 +321,9 @@ namespace SimpleWeb {
     public:
       template <typename... Args>
       Connection(std::shared_ptr<ScopeRunner> handler_runner_, Args &&...args) noexcept : handler_runner(std::move(handler_runner_)), socket(new socket_type(std::forward<Args>(args)...)), write_strand(get_executor(socket->lowest_layer())) {}
+
+      Mutex context_mutex;
+      std::shared_ptr<void> context GUARDED_BY(context_mutex);
 
       std::shared_ptr<ScopeRunner> handler_runner;
 
